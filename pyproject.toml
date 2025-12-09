@@ -1,0 +1,9 @@
+[project]
+name = "huckletui"
+version = "0.1.0"
+description = "cli tool for interacting with the huckleberry baby tracking mobile app"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "huckleberry-api>=0.1.11",
+]
