@@ -1,11 +1,14 @@
 import os
 import sys
 import logging
+import time
+import uuid
 from datetime import datetime, timedelta
 from huckleberry_api.api import HuckleberryAPI
 from textual.app import App, ComposeResult
-from textual.widgets import Static
-from textual.containers import Grid
+from textual.widgets import Static, Input, Label
+from textual.containers import Grid, Vertical
+from textual.screen import ModalScreen
 from textual import work
 
 # Configure logging to a file to avoid messing up the TUI
@@ -20,7 +23,40 @@ logging.getLogger('huckleberry_api').setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
+class BottleLogScreen(ModalScreen[int]):
+    """Screen for logging a bottle feeding."""
+    CSS = """
+    BottleLogScreen {
+        align: center middle;
+    }
+    #dialog {
+        width: 17;
+        height: auto;
+        border: thick $primary;
+        background: $surface;
+        padding: 1 2;
+    }
+    Input {
+        margin-top: 1;
+    }
+    """
+    def compose(self) -> ComposeResult:
+        with Vertical(id="dialog"):
+            yield Label("Amount (ml):")
+            yield Input(placeholder="ml", id="amount_input")
+
+    def on_mount(self) -> None:
+        self.query_one(Input).focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        try:
+            amount = int(event.value)
+            self.dismiss(amount)
+        except ValueError:
+            self.notify("Please enter a valid number", severity="error")
+
 class HuckleberryTUI(App):
+    BINDINGS = [("l", "log_bottle", "Log Bottle")]
     CSS = """
     #container {
         width: 100%;
@@ -48,6 +84,7 @@ class HuckleberryTUI(App):
         self.last_feed_amount = 0
         self.last_feed_unit = "ml"
         self.api = None
+        self.child_uid = None
 
     def compose(self) -> ComposeResult:
         with Grid(id="container"):
@@ -65,6 +102,59 @@ class HuckleberryTUI(App):
     def on_mount(self) -> None:
         self.start_monitoring()
         self.set_interval(1, self.update_times)
+
+    def action_log_bottle(self) -> None:
+        self.push_screen(BottleLogScreen(), self.do_log_bottle)
+
+    @work(exclusive=True, thread=True)
+    def do_log_bottle(self, amount: int | None) -> None:
+        if amount is None or not self.api or not self.child_uid:
+            return
+
+        try:
+            logger.info(f"Logging bottle: {amount}ml")
+            
+            # Use the underlying firestore client from the API
+            # Since we can't easily modify the library, we'll implement it here
+            db = self.api._get_firestore_client()
+            feed_ref = db.collection("feed").document(self.child_uid)
+            
+            now_time = time.time()
+            # Calculate offset in minutes (UTC - Local)
+            # time.localtime().tm_gmtoff is seconds east of UTC
+            offset = -time.localtime(now_time).tm_gmtoff / 60
+            interval_id = f"{int(now_time * 1000)}-{uuid.uuid4().hex[:20]}"
+            
+            # Create interval
+            feed_ref.collection("intervals").document(interval_id).set({
+                "mode": "bottle",
+                "start": now_time,
+                "amount": float(amount),
+                "units": "ml",
+                "bottleType": "Formula",
+                "lastUpdated": now_time,
+                "offset": offset,
+                "end_offset": offset,
+            })
+            
+            # Update prefs
+            feed_ref.update({
+                "prefs.lastBottle": {
+                    "mode": "bottle",
+                    "start": now_time,
+                    "amount": float(amount),
+                    "units": "ml",
+                    "bottleType": "Formula",
+                    "offset": offset,
+                },
+                "prefs.timestamp": {"seconds": now_time},
+                "prefs.local_timestamp": now_time,
+            })
+            
+            self.call_from_thread(self.notify, f"Logged {amount}ml bottle")
+        except Exception as e:
+            logger.exception("Failed to log bottle")
+            self.call_from_thread(self.notify, f"Error: {e}", severity="error")
 
     @work(exclusive=True, thread=True)
     def start_monitoring(self) -> None:
@@ -85,10 +175,10 @@ class HuckleberryTUI(App):
                 return
                 
             child = children[0]
-            child_uid = child['uid']
+            self.child_uid = child['uid']
             
             logger.info(f"Monitoring feeding for: {child['name']}")
-            self.api.setup_feed_listener(child_uid, self.on_feed_update)
+            self.api.setup_feed_listener(self.child_uid, self.on_feed_update)
         except Exception as e:
             logger.exception("Failed to start monitoring")
             self.call_from_thread(self.notify, f"Error: {e}", severity="error")
@@ -101,8 +191,8 @@ class HuckleberryTUI(App):
         if last_bottle:
             start = last_bottle.get('start')
             if start:
-                amount = int(last_bottle.get('bottleAmount', 0))
-                unit = last_bottle.get('bottleUnits', 'ml')
+                amount = int(last_bottle.get('amount', 0))
+                unit = last_bottle.get('units', 'ml')
                 
                 self.last_feed_time = datetime.fromtimestamp(start)
                 self.last_feed_amount = amount
