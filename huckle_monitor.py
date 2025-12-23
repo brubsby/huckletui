@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 class BottleLogScreen(ModalScreen[int]):
     """Screen for logging a bottle feeding."""
+    BINDINGS = [("escape", "dismiss", "Dismiss")]
     CSS = """
     BottleLogScreen {
         align: center middle;
@@ -43,20 +44,29 @@ class BottleLogScreen(ModalScreen[int]):
     def compose(self) -> ComposeResult:
         with Vertical(id="dialog"):
             yield Label("Amount (ml):")
-            yield Input(placeholder="ml", id="amount_input")
+            yield Input(placeholder="ml", id="amount_input", restrict=r"^[0-9]*$")
 
     def on_mount(self) -> None:
         self.query_one(Input).focus()
 
+    def action_dismiss(self) -> None:
+        self.dismiss(None)
+
     def on_input_submitted(self, event: Input.Submitted) -> None:
         try:
-            amount = int(event.value)
-            self.dismiss(amount)
+            if event.value:
+                amount = int(event.value)
+                self.dismiss(amount)
+            else:
+                self.dismiss(None)
         except ValueError:
             self.notify("Please enter a valid number", severity="error")
 
 class HuckleberryTUI(App):
-    BINDINGS = [("l", "log_bottle", "Log Bottle")]
+    BINDINGS = [
+        ("l", "log_bottle", "Log Bottle"),
+        ("ctrl+c", "quit", "Quit")
+    ]
     CSS = """
     #container {
         width: 100%;
@@ -91,13 +101,13 @@ class HuckleberryTUI(App):
             yield Static("", id="last_feed", classes="data")
             yield Static("", id="last_volume", classes="label")
             yield Static("", id="elapsed", classes="data")
-            yield Static("elapsed", classes="label")
+            yield Static("since", classes="label")
             yield Static("", id="nap_time", classes="data")
-            yield Static("naptime", classes="label")
+            yield Static("sleepy", classes="label")
             yield Static("", id="short_wake", classes="data")
-            yield Static("short wake", classes="label")
+            yield Static("short", classes="label")
             yield Static("", id="long_wake", classes="data")
-            yield Static("long wake", classes="label")
+            yield Static("long", classes="label")
 
     def on_mount(self) -> None:
         self.start_monitoring()
@@ -142,8 +152,8 @@ class HuckleberryTUI(App):
                 "prefs.lastBottle": {
                     "mode": "bottle",
                     "start": now_time,
-                    "amount": float(amount),
-                    "units": "ml",
+                    "bottleAmount": float(amount),
+                    "bottleUnits": "ml",
                     "bottleType": "Formula",
                     "offset": offset,
                 },
@@ -185,17 +195,21 @@ class HuckleberryTUI(App):
 
     def on_feed_update(self, data):
         """Callback for feed updates from the API listener thread."""
+        logger.debug(f"Raw feed update data: {data}")
         prefs = data.get('prefs', {})
         last_bottle = prefs.get('lastBottle', {})
         
         if last_bottle:
+            logger.info(f"Last bottle found in prefs: {last_bottle}")
             start = last_bottle.get('start')
             if start:
-                amount = int(last_bottle.get('amount', 0))
-                unit = last_bottle.get('units', 'ml')
+                # prefs.lastBottle uses bottleAmount/bottleUnits
+                amount = last_bottle.get('bottleAmount', 0)
+                unit = last_bottle.get('bottleUnits', 'ml')
+                logger.info(f"Extracted bottle info: amount={amount}, unit={unit}")
                 
                 self.last_feed_time = datetime.fromtimestamp(start)
-                self.last_feed_amount = amount
+                self.last_feed_amount = int(amount) if amount is not None else 0
                 self.last_feed_unit = unit
                 
                 # Update UI from thread
@@ -215,7 +229,7 @@ class HuckleberryTUI(App):
         total_seconds = abs(int(total_seconds))
         hours, remainder = divmod(total_seconds, 3600)
         minutes, _ = divmod(remainder, 60)
-        return f"{sign}{hours:02d}:{minutes:02d}"
+        return f"{sign}{hours}:{minutes:02d}"
 
     def update_times(self) -> None:
         if not self.last_feed_time:
@@ -229,7 +243,7 @@ class HuckleberryTUI(App):
         self.query_one("#elapsed", Static).update(f"[b]{self.format_diff(elapsed_seconds)}[/b]")
 
         # Midpoints (in seconds from feed)
-        # Naptime: 1:07:30 (Midpoint of 1:00-1:15)
+        # Sleepy: 1:07:30 (Midpoint of 1:00-1:15)
         # Short: 2:07:30 (Midpoint of 2:00-2:15)
         # Long: 2:37:30 (Midpoint of 2:30-2:45)
         midpoints = {

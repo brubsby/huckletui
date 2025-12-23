@@ -9,10 +9,10 @@ Designed to be a quick, low-friction way to track your baby's schedule at a glan
 - **Real-time Monitoring**: Automatically updates when data is logged in the Huckleberry mobile app.
 - **Feeding History**: Displays the time and volume of the most recent bottle feeding.
 - **Smart Timers**:
-  - **Elapsed**: Time since the last feeding logged.
-  - **Naptime**: Target window for the start of naptime.
-  - **Short Wake**: Target window to estimate wake time after a short nap.
-  - **Long Wake**: Target window to estimate wake time after a long nap.
+  - **Since**: Time since the last feeding logged.
+  - **Sleepy**: Target window for the start of naptime.
+  - **Short**: Target window to estimate wake time after a short nap.
+  - **Long**: Target window to estimate wake time after a long nap.
 - **Bottle Logging**: Quickly log a new bottle feeding with a custom volume (ml) at the current time.
 
 ## Setup
@@ -44,7 +44,7 @@ uv run huckle_monitor.py
 |  Key     | Action               |
 |----------|----------------------|
 | `l`      | Log a bottle feeding |
-| `ctrl+q` | Quit the application |
+| `ctrl+c` | Quit the application |
 
 ## Technical Details
 
