@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from huckleberry_api.api import HuckleberryAPI
 from textual.app import App, ComposeResult
 from textual.widgets import Static
-from textual.containers import Vertical
+from textual.containers import Grid
 from textual import work
 
 # Configure logging to a file to avoid messing up the TUI
@@ -26,14 +26,19 @@ class HuckleberryTUI(App):
         width: 100%;
         height: 100%;
         border: solid grey;
+        layout: grid;
+        grid-size: 2;
+        grid-columns: 1fr 1fr;
         align: center middle;
     }
-    Static {
-        width: 100%;
-        content-align: center middle;
+    .data {
+        content-align: right middle;
+        padding-right: 1;
     }
-    #last_feed {
-        margin-bottom: 1;
+    .label {
+        content-align: left middle;
+        padding-left: 1;
+        color: $text-muted;
     }
     """
 
@@ -45,14 +50,17 @@ class HuckleberryTUI(App):
         self.api = None
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="container"):
-            yield Static("last feed:", id="label_last_feed")
-            yield Static("", id="last_feed")
-            yield Static("", id="elapsed")
-            yield Static("short wake:", id="label_short_wake")
-            yield Static("", id="short_wake")
-            yield Static("long wake:", id="label_long_wake")
-            yield Static("", id="long_wake")
+        with Grid(id="container"):
+            yield Static("", id="last_feed", classes="data")
+            yield Static("", id="last_volume", classes="label")
+            yield Static("", id="elapsed", classes="data")
+            yield Static("elapsed", classes="label")
+            yield Static("", id="nap_time", classes="data")
+            yield Static("naptime", classes="label")
+            yield Static("", id="short_wake", classes="data")
+            yield Static("short wake", classes="label")
+            yield Static("", id="long_wake", classes="data")
+            yield Static("long wake", classes="label")
 
     def on_mount(self) -> None:
         self.start_monitoring()
@@ -108,9 +116,8 @@ class HuckleberryTUI(App):
     def refresh_ui(self) -> None:
         if self.last_feed_time:
             time_str = self.last_feed_time.strftime('%H:%M')
-            self.query_one("#last_feed", Static).update(
-                f"{self.last_feed_amount}{self.last_feed_unit} [b]{time_str}[/b]"
-            )
+            self.query_one("#last_feed", Static).update(f"[b]{time_str}[/b]")
+            self.query_one("#last_volume", Static).update(f"{self.last_feed_amount}{self.last_feed_unit}")
             self.update_times()
 
     def format_diff(self, total_seconds: int) -> str:
@@ -128,13 +135,15 @@ class HuckleberryTUI(App):
         elapsed_td = now - self.last_feed_time
         elapsed_seconds = elapsed_td.total_seconds()
         
-        # Line: +hh:mm elapsed
-        self.query_one("#elapsed", Static).update(f"[b]{self.format_diff(elapsed_seconds)}[/b] elapsed")
+        # Line: +hh:mm
+        self.query_one("#elapsed", Static).update(f"[b]{self.format_diff(elapsed_seconds)}[/b]")
 
         # Midpoints (in seconds from feed)
+        # Naptime: 1:07:30 (Midpoint of 1:00-1:15)
         # Short: 2:07:30 (Midpoint of 2:00-2:15)
         # Long: 2:37:30 (Midpoint of 2:30-2:45)
         midpoints = {
+            "#nap_time": 1 * 3600 + 7 * 60 + 30,
             "#short_wake": 2 * 3600 + 7 * 60 + 30,
             "#long_wake": 2 * 3600 + 37 * 60 + 30
         }
