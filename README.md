@@ -7,6 +7,7 @@ Designed to be a quick, low-friction way to track your baby's schedule at a glan
 ## Features
 
 - **Real-time Monitoring**: Automatically updates when data is logged in the Huckleberry mobile app.
+- **Auto-Reconnect**: Detects system sleep/wake cycles and automatically reconnects to the API.
 - **Feeding History**: Displays the time and volume of the most recent bottle feeding.
 - **Smart Timers**:
   - **Since**: Time since the last feeding logged.
@@ -44,6 +45,7 @@ uv run huckle_monitor.py
 |  Key     | Action               |
 |----------|----------------------|
 | `l`      | Log a bottle feeding |
+| `r`      | Refresh connection   |
 | `ctrl+c` | Quit the application |
 
 ## Technical Details

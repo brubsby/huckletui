@@ -65,6 +65,7 @@ class BottleLogScreen(ModalScreen[int]):
 class HuckleberryTUI(App):
     BINDINGS = [
         ("l", "log_bottle", "Log Bottle"),
+        ("r", "refresh_connection", "Refresh"),
         ("ctrl+c", "quit", "Quit")
     ]
     CSS = """
@@ -95,6 +96,7 @@ class HuckleberryTUI(App):
         self.last_feed_unit = "ml"
         self.api = None
         self.child_uid = None
+        self.last_tick = time.time()
 
     def compose(self) -> ComposeResult:
         with Grid(id="container"):
@@ -112,6 +114,37 @@ class HuckleberryTUI(App):
     def on_mount(self) -> None:
         self.start_monitoring()
         self.set_interval(1, self.update_times)
+
+    def action_refresh_connection(self) -> None:
+        self.notify("Refreshing connection...")
+        self.refresh_connection()
+
+    @work(exclusive=True, thread=True)
+    def refresh_connection(self) -> None:
+        if not self.api:
+            return
+        
+        max_retries = 3
+        base_delay = 2
+
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"Refreshing connection/token (Attempt {attempt + 1}/{max_retries})...")
+                self.api.refresh_auth_token()
+                self.call_from_thread(self.notify, "Connection refreshed")
+                return
+            except Exception as e:
+                is_last_attempt = attempt == max_retries - 1
+                logger.warning(f"Refresh attempt {attempt + 1} failed: {e}")
+                
+                if is_last_attempt:
+                    logger.error(f"All refresh attempts failed. Error: {e}")
+                    self.call_from_thread(self.notify, f"Refresh failed: {e}", severity="error")
+                else:
+                    # Wait before retrying (exponential backoff: 2s, 4s, ...)
+                    wait_time = base_delay * (2 ** attempt)
+                    self.call_from_thread(self.notify, f"Refresh failed, retrying in {wait_time}s...", severity="warning")
+                    time.sleep(wait_time)
 
     def action_log_bottle(self) -> None:
         self.push_screen(BottleLogScreen(), self.do_log_bottle)
@@ -232,6 +265,16 @@ class HuckleberryTUI(App):
         return f"{sign}{hours}:{minutes:02d}"
 
     def update_times(self) -> None:
+        current_time = time.time()
+        delta = current_time - self.last_tick
+        self.last_tick = current_time
+
+        # If more than 10 seconds have passed since last tick, we probably slept
+        if delta > 10:
+            logger.info(f"Sleep/Lag detected (delta={delta:.1f}s). Triggering refresh.")
+            self.notify(f"System wake detected ({delta:.0f}s). Reconnecting...")
+            self.refresh_connection()
+
         if not self.last_feed_time:
             return
 
